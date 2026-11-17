@@ -45,9 +45,9 @@ type RecoItemSummary = {
 type RecoDailySummary = {
   dateIso: string | null;
   itemCode: string;
-  totalIn: number;
-  totalOut: number;
-  net: number;
+  type: RecoTxnType;
+  qtyMeters: number;
+  runningBalance: number;
   txnCount: number;
 };
 
@@ -92,9 +92,9 @@ const RECO_DAILY_HEADERS = [
   "STT",
   "Ngày",
   "Mã hàng (Item Code)",
-  "Nhập IN (m)",
-  "Xuất OUT (m)",
-  "Chênh lệch Net (m)",
+  "Loại (IN/OUT)",
+  "Số mét (m)",
+  "Số lượng tồn (m)",
   "Số giao dịch",
 ];
 
@@ -608,43 +608,55 @@ const recoAggregateByDateAndItem = (
   const map = new Map<string, RecoDailySummary>();
 
   for (const txn of transactions) {
-    const key = `${txn.dateIso ?? ""}|${txn.itemCode}`;
+    const key = `${txn.dateIso ?? ""}|${txn.itemCode}|${txn.type}`;
     let entry = map.get(key);
     if (!entry) {
       entry = {
         dateIso: txn.dateIso,
         itemCode: txn.itemCode,
-        totalIn: 0,
-        totalOut: 0,
-        net: 0,
+        type: txn.type,
+        qtyMeters: 0,
+        runningBalance: 0,
         txnCount: 0,
       };
       map.set(key, entry);
     }
-    if (txn.type === "IN") {
-      entry.totalIn += txn.qtyMeters;
-    } else {
-      entry.totalOut += txn.qtyMeters;
-    }
+    entry.qtyMeters += txn.qtyMeters;
     entry.txnCount += 1;
   }
 
   const result = Array.from(map.values());
   for (let i = 0; i < result.length; i++) {
-    const entry = result[i];
-    entry.totalIn = recoRoundQty(entry.totalIn);
-    entry.totalOut = recoRoundQty(entry.totalOut);
-    entry.net = recoRoundQty(entry.totalIn - entry.totalOut);
+    result[i].qtyMeters = recoRoundQty(result[i].qtyMeters);
   }
 
-  return result.sort((a, b) => {
+  result.sort((a, b) => {
     if (a.dateIso && b.dateIso && a.dateIso !== b.dateIso) {
       return a.dateIso < b.dateIso ? -1 : 1;
     }
     if (a.dateIso && !b.dateIso) return -1;
     if (!a.dateIso && b.dateIso) return 1;
-    return a.itemCode < b.itemCode ? -1 : a.itemCode > b.itemCode ? 1 : 0;
+    if (a.itemCode !== b.itemCode) {
+      return a.itemCode < b.itemCode ? -1 : 1;
+    }
+    if (a.type !== b.type) {
+      return a.type === "IN" ? -1 : 1;
+    }
+    return 0;
   });
+
+  const runningByItem = new Map<string, number>();
+  for (let i = 0; i < result.length; i++) {
+    const entry = result[i];
+    const prev = runningByItem.get(entry.itemCode) ?? 0;
+    const next = recoRoundQty(
+      entry.type === "IN" ? prev + entry.qtyMeters : prev - entry.qtyMeters,
+    );
+    entry.runningBalance = next;
+    runningByItem.set(entry.itemCode, next);
+  }
+
+  return result;
 };
 
 const recoBuildSummaryRows = (
@@ -713,20 +725,17 @@ const recoBuildEmptyTemplateRows = (
 
 const recoBuildDailyRows = (
   daily: RecoDailySummary[],
-  startDataRow: number,
+  _startDataRow: number = 0,
 ): RecoCellValue[][] =>
-  daily.map((entry, idx) => {
-    const row = startDataRow + idx;
-    return [
-      idx + 1,
-      entry.dateIso ? recoIsoToSerial(entry.dateIso) : "",
-      recoToCellItemCode(entry.itemCode),
-      entry.totalIn,
-      entry.totalOut,
-      `=D${row}-E${row}`,
-      entry.txnCount,
-    ];
-  });
+  daily.map((entry, idx) => [
+    idx + 1,
+    entry.dateIso ? recoIsoToSerial(entry.dateIso) : "",
+    recoToCellItemCode(entry.itemCode),
+    entry.type,
+    entry.qtyMeters,
+    entry.runningBalance,
+    entry.txnCount,
+  ]);
 
 const RECO_LARGE_TABLE_BORDER_ROW_LIMIT = 1000;
 
@@ -1059,7 +1068,7 @@ async function main(workbook: ExcelScript.Workbook) {
       targetSheet
         .getRange(`B${dailyStartRow}:B${dailyEndRow}`)
         .setNumberFormat("dd/mm/yyyy");
-      const dailyQtyRange = targetSheet.getRange(`D${dailyStartRow}:F${dailyEndRow}`);
+      const dailyQtyRange = targetSheet.getRange(`E${dailyStartRow}:F${dailyEndRow}`);
       dailyQtyRange.setNumberFormat("#,##0.00");
       dailyQtyRange
         .getFormat()
@@ -1067,6 +1076,27 @@ async function main(workbook: ExcelScript.Workbook) {
       targetSheet
         .getRange(`G${dailyStartRow}:G${dailyEndRow}`)
         .setNumberFormat("#,##0");
+
+      const dailyBalRange = targetSheet.getRange(`F${dailyStartRow}:F${dailyEndRow}`);
+      dailyBalRange.getFormat().getFont().setBold(true);
+      dailyBalRange.getFormat().getFill().setColor("#E2EFDA");
+      dailyBalRange.getFormat().getFont().setColor("#375623");
+
+      let dailyNegRunStart = -1;
+      for (let i = 0; i <= daily.length; i++) {
+        const isNeg = i < daily.length && daily[i].runningBalance < 0;
+        if (isNeg && dailyNegRunStart === -1) {
+          dailyNegRunStart = dailyStartRow + i;
+        } else if (!isNeg && dailyNegRunStart !== -1) {
+          const dailyNegRunEnd = dailyStartRow + i - 1;
+          const dailyNegRange = targetSheet.getRange(
+            `F${dailyNegRunStart}:F${dailyNegRunEnd}`,
+          );
+          dailyNegRange.getFormat().getFill().setColor("#FFC7CE");
+          dailyNegRange.getFormat().getFont().setColor("#9C0006");
+          dailyNegRunStart = -1;
+        }
+      }
     }
   }
 
