@@ -631,14 +631,14 @@ const recoAggregateByDateAndItem = (
   }
 
   result.sort((a, b) => {
+    if (a.itemCode !== b.itemCode) {
+      return a.itemCode < b.itemCode ? -1 : 1;
+    }
     if (a.dateIso && b.dateIso && a.dateIso !== b.dateIso) {
       return a.dateIso < b.dateIso ? -1 : 1;
     }
     if (a.dateIso && !b.dateIso) return -1;
     if (!a.dateIso && b.dateIso) return 1;
-    if (a.itemCode !== b.itemCode) {
-      return a.itemCode < b.itemCode ? -1 : 1;
-    }
     if (a.type !== b.type) {
       return a.type === "IN" ? -1 : 1;
     }
@@ -1063,6 +1063,8 @@ async function main(workbook: ExcelScript.Workbook) {
     dailyHeaderRange.getFormat().getFill().setColor("#305496");
     dailyHeaderRange.getFormat().setWrapText(true);
     dailyHeaderRange.getFormat().setRowHeight(28);
+
+    autoFilter.apply(dailyRows.length > 0 ? dailyTableRange : dailyHeaderRange);
 
     if (dailyRows.length > 0) {
       targetSheet

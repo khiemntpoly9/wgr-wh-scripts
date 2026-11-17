@@ -181,7 +181,7 @@ describe("Auto_Reco_Summary row parsing and aggregation", () => {
     ]);
   });
 
-  it("aggregates daily breakdown sorted by date ascending, item code, then IN before OUT", () => {
+  it("aggregates daily breakdown sorted by item code, date ascending (nulls last), then IN before OUT", () => {
     const txns = T.recoParseRows({
       date: col(["02/11/2026", "01/11/2026", "02/11/2026", "02/11/2026", "", ""]),
       type: col(["OUT", "IN", "IN", "IN", "OUT", "IN"]),
@@ -200,22 +200,6 @@ describe("Auto_Reco_Summary row parsing and aggregation", () => {
         txnCount: 1,
       },
       {
-        dateIso: "2026-11-02",
-        itemCode: "201050001",
-        type: "IN",
-        qtyMeters: 300,
-        runningBalance: 300,
-        txnCount: 2,
-      },
-      {
-        dateIso: "2026-11-02",
-        itemCode: "201050001",
-        type: "OUT",
-        qtyMeters: 120,
-        runningBalance: 180,
-        txnCount: 1,
-      },
-      {
         dateIso: null,
         itemCode: "110702000516",
         type: "IN",
@@ -229,6 +213,22 @@ describe("Auto_Reco_Summary row parsing and aggregation", () => {
         type: "OUT",
         qtyMeters: 15.25,
         runningBalance: 134.75,
+        txnCount: 1,
+      },
+      {
+        dateIso: "2026-11-02",
+        itemCode: "201050001",
+        type: "IN",
+        qtyMeters: 300,
+        runningBalance: 300,
+        txnCount: 2,
+      },
+      {
+        dateIso: "2026-11-02",
+        itemCode: "201050001",
+        type: "OUT",
+        qtyMeters: 120,
+        runningBalance: 180,
         txnCount: 1,
       },
     ]);
@@ -331,7 +331,7 @@ describe("Auto_Reco_Summary row parsing and aggregation", () => {
     expect(typeof dailyRows[0][2]).toBe("number");
   });
 
-  it("builds separate IN and OUT daily rows with independent runningBalance per itemCode", () => {
+  it("builds separate IN and OUT daily rows grouped by itemCode with independent runningBalance", () => {
     const txns = T.recoParseRows({
       date: col(["05/11/2026", "05/11/2026", "06/11/2026", "07/11/2026", ""]),
       type: col(["OUT", "IN", "IN", "OUT", "OUT"]),
@@ -342,11 +342,11 @@ describe("Auto_Reco_Summary row parsing and aggregation", () => {
     const daily = T.recoAggregateByDateAndItem(txns);
     const dailyRows = T.recoBuildDailyRows(daily);
     expect(dailyRows).toEqual([
-      [1, T.recoIsoToSerial("2026-11-05"), "FAB-001", "IN", 120.75, 120.75, 1],
-      [2, T.recoIsoToSerial("2026-11-05"), "FAB-001", "OUT", 45.5, 75.25, 1],
-      [3, T.recoIsoToSerial("2026-11-06"), 110702000516, "IN", 100, 100, 1],
-      [4, T.recoIsoToSerial("2026-11-07"), "FAB-001", "OUT", 100, -24.75, 1],
-      [5, "", 110702000516, "OUT", 30, 70, 1],
+      [1, T.recoIsoToSerial("2026-11-06"), 110702000516, "IN", 100, 100, 1],
+      [2, "", 110702000516, "OUT", 30, 70, 1],
+      [3, T.recoIsoToSerial("2026-11-05"), "FAB-001", "IN", 120.75, 120.75, 1],
+      [4, T.recoIsoToSerial("2026-11-05"), "FAB-001", "OUT", 45.5, 75.25, 1],
+      [5, T.recoIsoToSerial("2026-11-07"), "FAB-001", "OUT", 100, -24.75, 1],
     ]);
   });
 
