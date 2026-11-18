@@ -700,26 +700,13 @@ const recoBuildSummaryRows = (
 
 const recoBuildEmptyTemplateRows = (
   rowCount: number,
-  startDataRow: number,
+  _startDataRow: number = 0,
 ): RecoCellValue[][] => {
   const safeCount = Math.max(1, rowCount);
   const rows: RecoCellValue[][] = [];
   for (let i = 0; i < safeCount; i++) {
     rows.push([i + 1, "", "", "", "", "", "", "", "", ""]);
   }
-  const endDataRow = startDataRow + safeCount - 1;
-  rows.push([
-    "",
-    "TỔNG CỘNG",
-    `=SUM(C${startDataRow}:C${endDataRow})`,
-    `=SUM(D${startDataRow}:D${endDataRow})`,
-    `=SUM(E${startDataRow}:E${endDataRow})`,
-    `=SUM(F${startDataRow}:F${endDataRow})`,
-    `=SUM(G${startDataRow}:G${endDataRow})`,
-    `=SUM(H${startDataRow}:H${endDataRow})`,
-    "",
-    "",
-  ]);
   return rows;
 };
 
@@ -864,7 +851,7 @@ async function main(workbook: ExcelScript.Workbook) {
   const summaryTotalRow = summaryStartRow + summaryDataCount;
 
   const subtitleText = isEmptyTemplateMode
-    ? `Hướng dẫn: Nhập Mã hàng (Item Code) vào cột B (từ dòng ${summaryStartRow} đến dòng ${summaryDataEndRow}), sau đó chạy lại script để tổng hợp dữ liệu từ "${CFG.sourceSheet}".`
+    ? `Hướng dẫn: Nhập Mã hàng (Item Code) vào cột B (từ dòng ${summaryStartRow} trở đi, không giới hạn số dòng), sau đó chạy lại script để tổng hợp dữ liệu từ "${CFG.sourceSheet}".`
     : `Thời gian: ${recoFormatTimestamp(CFG.timezoneOffsetHours)}  |  Nguồn: ${CFG.sourceSheet} (từ dòng ${CFG.startRow})  |  Mã hàng lọc: ${userItemCodes.join(", ")}  |  Số giao dịch khớp: ${transactions.length}`;
 
   const emptyRow10 = (): RecoCellValue[] => ["", "", "", "", "", "", "", "", "", ""];
@@ -930,9 +917,11 @@ async function main(workbook: ExcelScript.Workbook) {
 
   // Apply integer format "0" before setValues so numeric Item Codes display all digits
   // without scientific notation and without Excel's "Number Stored as Text" warning.
-  targetSheet
-    .getRange(`B${summaryStartRow}:B${summaryDataEndRow}`)
-    .setNumberFormat("0");
+  // In template mode, format the entire column from summaryStartRow downward (no row limit).
+  const itemCodeFormatRange = isEmptyTemplateMode
+    ? `B${summaryStartRow}:B1048576`
+    : `B${summaryStartRow}:B${summaryDataEndRow}`;
+  targetSheet.getRange(itemCodeFormatRange).setNumberFormat("0");
   if (hasDailySection && dailyRows.length > 0) {
     targetSheet
       .getRange(`C${dailyStartRow}:C${dailyEndRow}`)
@@ -990,32 +979,34 @@ async function main(workbook: ExcelScript.Workbook) {
   summaryHeaderRange.getFormat().setWrapText(true);
   summaryHeaderRange.getFormat().setRowHeight(30);
 
-  const summaryQtyRange = targetSheet.getRange(`C${summaryStartRow}:E${summaryEndRow}`);
+  const qtyFormatEndRow = isEmptyTemplateMode ? 1048576 : summaryEndRow;
+  const dateFormatEndRow = isEmptyTemplateMode ? 1048576 : summaryDataEndRow;
+  const summaryQtyRange = targetSheet.getRange(`C${summaryStartRow}:E${qtyFormatEndRow}`);
   summaryQtyRange.setNumberFormat("#,##0.00");
   summaryQtyRange
     .getFormat()
     .setHorizontalAlignment(ExcelScript.HorizontalAlignment.right);
   targetSheet
-    .getRange(`F${summaryStartRow}:H${summaryEndRow}`)
+    .getRange(`F${summaryStartRow}:H${qtyFormatEndRow}`)
     .setNumberFormat("#,##0");
   targetSheet
-    .getRange(`I${summaryStartRow}:J${summaryDataEndRow}`)
+    .getRange(`I${summaryStartRow}:J${dateFormatEndRow}`)
     .setNumberFormat("dd/mm/yyyy");
+
+  if (isEmptyTemplateMode) {
+    targetSheet.getRange(`A${summaryHeaderRow}:J${summaryEndRow}`).getFormat().autofitColumns();
+    targetSheet.activate();
+    console.log(
+      `Auto_Reco_Summary: Đã tạo bảng mẫu trống trên "${CFG.targetSheet}". Vui lòng nhập Mã hàng (Item Code) vào cột B (từ dòng ${summaryStartRow} trở đi, không giới hạn số dòng) rồi chạy lại script.`,
+    );
+    return;
+  }
 
   const totalRowRange = targetSheet.getRange(
     `A${summaryTotalRow}:J${summaryTotalRow}`,
   );
   totalRowRange.getFormat().getFont().setBold(true);
   totalRowRange.getFormat().getFill().setColor("#D9E1F2");
-
-  if (isEmptyTemplateMode) {
-    targetSheet.getRange(`A${summaryHeaderRow}:J${summaryEndRow}`).getFormat().autofitColumns();
-    targetSheet.activate();
-    console.log(
-      `Auto_Reco_Summary: Đã tạo bảng mẫu trống trên "${CFG.targetSheet}". Vui lòng nhập Mã hàng (Item Code) vào cột B (dòng ${summaryStartRow}–${summaryDataEndRow}) rồi chạy lại script.`,
-    );
-    return;
-  }
 
   // Batch-format Balance column: apply positive style once, then batch contiguous negative runs.
   if (summaries.length > 0) {

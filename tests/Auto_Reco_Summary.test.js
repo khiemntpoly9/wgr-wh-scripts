@@ -439,23 +439,11 @@ describe("Auto_Reco_Summary user-driven input, empty template, and integer forma
     ).toEqual(["300000001"]);
   });
 
-  it("builds empty template rows with TỔNG CỘNG formulas and no pre-filled item codes", () => {
+  it("builds empty template rows without a TỔNG CỘNG blocker row or pre-filled item codes", () => {
     const rows = T.recoBuildEmptyTemplateRows(10, 6);
-    expect(rows).toHaveLength(11);
+    expect(rows).toHaveLength(10);
     expect(rows[0]).toEqual([1, "", "", "", "", "", "", "", "", ""]);
     expect(rows[9]).toEqual([10, "", "", "", "", "", "", "", "", ""]);
-    expect(rows[10]).toEqual([
-      "",
-      "TỔNG CỘNG",
-      "=SUM(C6:C15)",
-      "=SUM(D6:D15)",
-      "=SUM(E6:E15)",
-      "=SUM(F6:F15)",
-      "=SUM(G6:G15)",
-      "=SUM(H6:H15)",
-      "",
-      "",
-    ]);
   });
 
   it("detects last data row via getUsedRange(true) and returns 0 on empty sheet", () => {
