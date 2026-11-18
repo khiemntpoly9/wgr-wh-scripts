@@ -77,6 +77,7 @@ describe("Auto_PMC_Offset_Adjust extraction and offset calculation", () => {
         note: "",
         isLastOfItem: false,
         matchedKho: true,
+        isShortageWarning: false,
       },
       {
         itemCode: "110703000003",
@@ -86,6 +87,7 @@ describe("Auto_PMC_Offset_Adjust extraction and offset calculation", () => {
         note: "Đã bù trừ",
         isLastOfItem: true,
         matchedKho: true,
+        isShortageWarning: false,
       },
     ]);
 
@@ -111,15 +113,18 @@ describe("Auto_PMC_Offset_Adjust extraction and offset calculation", () => {
     ]);
   });
 
-  it("handles exact matches, negative offsets, interleaved items, and unmatched ERP codes", () => {
+  it("does NOT adjust and flags shortage warning when Kho < PMC, plus exact match and unmatched ERP", () => {
     const khoEntries = [
       { itemCode: "A1", qty: 100 },
       { itemCode: "B2", qty: 50 },
+      { itemCode: "D4", qty: 80 },
     ];
     const erpEntries = [
       { itemCode: "A1", qty: 40 },
       { itemCode: "B2", qty: 60 },
+      { itemCode: "D4", qty: 50 },
       { itemCode: "A1", qty: 60 },
+      { itemCode: "D4", qty: 35.5 },
       { itemCode: "C3", qty: 25 },
     ];
 
@@ -133,15 +138,27 @@ describe("Auto_PMC_Offset_Adjust extraction and offset calculation", () => {
         note: "",
         isLastOfItem: false,
         matchedKho: true,
+        isShortageWarning: false,
       },
       {
         itemCode: "B2",
         originalQty: 60,
-        adjustedQty: 50,
-        offsetDiff: -10,
-        note: "Đã bù trừ",
+        adjustedQty: 60,
+        offsetDiff: 0,
+        note: "Cảnh báo: Kho ít hơn PMC (thiếu 10) - Không bù",
         isLastOfItem: true,
         matchedKho: true,
+        isShortageWarning: true,
+      },
+      {
+        itemCode: "D4",
+        originalQty: 50,
+        adjustedQty: 50,
+        offsetDiff: 0,
+        note: "",
+        isLastOfItem: false,
+        matchedKho: true,
+        isShortageWarning: true,
       },
       {
         itemCode: "A1",
@@ -151,6 +168,17 @@ describe("Auto_PMC_Offset_Adjust extraction and offset calculation", () => {
         note: "Khớp",
         isLastOfItem: true,
         matchedKho: true,
+        isShortageWarning: false,
+      },
+      {
+        itemCode: "D4",
+        originalQty: 35.5,
+        adjustedQty: 35.5,
+        offsetDiff: 0,
+        note: "Cảnh báo: Kho ít hơn PMC (thiếu 5.5) - Không bù",
+        isLastOfItem: true,
+        matchedKho: true,
+        isShortageWarning: true,
       },
       {
         itemCode: "C3",
@@ -160,6 +188,7 @@ describe("Auto_PMC_Offset_Adjust extraction and offset calculation", () => {
         note: "Không tìm thấy mã bên Kho",
         isLastOfItem: true,
         matchedKho: false,
+        isShortageWarning: false,
       },
     ]);
   });

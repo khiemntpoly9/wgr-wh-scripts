@@ -35,6 +35,7 @@ type PmcAdjustedRow = {
   note: string;
   isLastOfItem: boolean;
   matchedKho: boolean;
+  isShortageWarning: boolean;
 };
 
 type PmcParsedInput = {
@@ -270,6 +271,27 @@ const pmcComputeOffsetAdjustments = (
         note: "Không tìm thấy mã bên Kho",
         isLastOfItem: isLast,
         matchedKho: false,
+        isShortageWarning: false,
+      });
+      continue;
+    }
+
+    const khoQty = khoMap.get(entry.itemCode)!;
+    const pmcSum = erpSumMap.get(entry.itemCode) ?? 0;
+    const diff = pmcRoundQty(khoQty - pmcSum);
+
+    if (diff < 0) {
+      results.push({
+        itemCode: entry.itemCode,
+        originalQty: entry.qty,
+        adjustedQty: entry.qty,
+        offsetDiff: 0,
+        note: isLast
+          ? `Cảnh báo: Kho ít hơn PMC (thiếu ${pmcRoundQty(Math.abs(diff))}) - Không bù`
+          : "",
+        isLastOfItem: isLast,
+        matchedKho: true,
+        isShortageWarning: true,
       });
       continue;
     }
@@ -283,13 +305,11 @@ const pmcComputeOffsetAdjustments = (
         note: "",
         isLastOfItem: false,
         matchedKho: true,
+        isShortageWarning: false,
       });
       continue;
     }
 
-    const khoQty = khoMap.get(entry.itemCode)!;
-    const pmcSum = erpSumMap.get(entry.itemCode) ?? 0;
-    const diff = pmcRoundQty(khoQty - pmcSum);
     const adjustedQty = pmcRoundQty(entry.qty + diff);
 
     results.push({
@@ -300,6 +320,7 @@ const pmcComputeOffsetAdjustments = (
       note: diff === 0 ? "Khớp" : "Đã bù trừ",
       isLastOfItem: true,
       matchedKho: true,
+      isShortageWarning: false,
     });
   }
 
@@ -447,13 +468,20 @@ async function main(workbook: ExcelScript.Workbook) {
   const finalBottomRow = isEmptyTemplateMode ? dataEndRow : totalRow;
 
   const adjustedCount = adjustedRows.filter(
-    (r) => r.isLastOfItem && r.matchedKho && r.offsetDiff !== 0,
+    (r) => r.isLastOfItem && r.matchedKho && !r.isShortageWarning && r.offsetDiff !== 0,
   ).length;
   const unmatchedCount = adjustedRows.filter((r) => !r.matchedKho).length;
+  const shortageItemSet = new Set<string>();
+  for (let i = 0; i < adjustedRows.length; i++) {
+    if (adjustedRows[i].isShortageWarning) {
+      shortageItemSet.add(adjustedRows[i].itemCode);
+    }
+  }
+  const shortageCount = shortageItemSet.size;
 
   const subtitleText = isEmptyTemplateMode
     ? `Hướng dẫn: Nhập Mã hàng & SL Kho (cột B–C) và Mã hàng ERP & SL PMC (cột D–E) từ dòng ${startDataRow} trở đi (không giới hạn số dòng), rồi chạy lại script để tính bù trừ.`
-    : `Thời gian: ${pmcFormatTimestamp(7)}  |  Mã Kho: ${parsed.khoEntries.length}  |  Dòng ERP/PMC: ${parsed.erpEntries.length}  |  Đã bù trừ: ${adjustedCount} mã${unmatchedCount > 0 ? `  |  Chưa khớp Kho: ${unmatchedCount} dòng` : ""}`;
+    : `Thời gian: ${pmcFormatTimestamp(7)}  |  Mã Kho: ${parsed.khoEntries.length}  |  Dòng ERP/PMC: ${parsed.erpEntries.length}  |  Đã bù trừ: ${adjustedCount} mã${shortageCount > 0 ? `  |  Cảnh báo Kho < PMC: ${shortageCount} mã (không bù)` : ""}${unmatchedCount > 0 ? `  |  Chưa khớp Kho: ${unmatchedCount} dòng` : ""}`;
 
   const emptyRow8 = (): PmcCellValue[] => ["", "", "", "", "", "", "", ""];
 
@@ -536,6 +564,42 @@ async function main(workbook: ExcelScript.Workbook) {
     );
     adjColRange.getFormat().getFill().setColor("#E2EFDA");
 
+    // Batch contiguous red warning highlights for ERP rows where Kho < PMC
+    let erpWarnStart = -1;
+    for (let i = 0; i <= adjustedRows.length; i++) {
+      const isShortage = i < adjustedRows.length && adjustedRows[i].isShortageWarning;
+      if (isShortage && erpWarnStart === -1) {
+        erpWarnStart = startDataRow + i;
+      } else if (!isShortage && erpWarnStart !== -1) {
+        const erpWarnEnd = startDataRow + i - 1;
+        const warnRange = sheet.getRange(`D${erpWarnStart}:H${erpWarnEnd}`);
+        warnRange.getFormat().getFill().setColor("#FFC7CE");
+        warnRange.getFormat().getFont().setColor("#9C0006");
+        warnRange.getFormat().getFont().setBold(true);
+        erpWarnStart = -1;
+      }
+    }
+
+    // Batch contiguous red warning highlights for matching Kho cells (B:C) where Kho < PMC
+    if (shortageItemSet.size > 0) {
+      let khoWarnStart = -1;
+      for (let i = 0; i <= parsed.khoEntries.length; i++) {
+        const isShortageKho =
+          i < parsed.khoEntries.length &&
+          shortageItemSet.has(parsed.khoEntries[i].itemCode);
+        if (isShortageKho && khoWarnStart === -1) {
+          khoWarnStart = startDataRow + i;
+        } else if (!isShortageKho && khoWarnStart !== -1) {
+          const khoWarnEnd = startDataRow + i - 1;
+          const khoWarnRange = sheet.getRange(`B${khoWarnStart}:C${khoWarnEnd}`);
+          khoWarnRange.getFormat().getFill().setColor("#FFC7CE");
+          khoWarnRange.getFormat().getFont().setColor("#9C0006");
+          khoWarnRange.getFormat().getFont().setBold(true);
+          khoWarnStart = -1;
+        }
+      }
+    }
+
     for (let i = 0; i < adjustedRows.length; i++) {
       const r = adjustedRows[i];
       const rowNum = startDataRow + i;
@@ -543,7 +607,7 @@ async function main(workbook: ExcelScript.Workbook) {
         const warnRange = sheet.getRange(`G${rowNum}:H${rowNum}`);
         warnRange.getFormat().getFill().setColor("#FFC7CE");
         warnRange.getFormat().getFont().setColor("#9C0006");
-      } else if (r.isLastOfItem && r.offsetDiff !== 0) {
+      } else if (!r.isShortageWarning && r.isLastOfItem && r.offsetDiff !== 0) {
         const diffRange = sheet.getRange(`F${rowNum}:H${rowNum}`);
         diffRange.getFormat().getFont().setBold(true);
         diffRange.getFormat().getFill().setColor("#FFF2CC");
@@ -561,7 +625,7 @@ async function main(workbook: ExcelScript.Workbook) {
     );
   } else {
     console.log(
-      `Auto_PMC_Offset_Adjust hoàn tất: ${parsed.khoEntries.length} mã Kho, ${parsed.erpEntries.length} dòng ERP/PMC, đã bù trừ ${adjustedCount} mã.`,
+      `Auto_PMC_Offset_Adjust hoàn tất: ${parsed.khoEntries.length} mã Kho, ${parsed.erpEntries.length} dòng ERP/PMC, đã bù trừ ${adjustedCount} mã${shortageCount > 0 ? `, cảnh báo Kho < PMC (không bù): ${shortageCount} mã` : ""}.`,
     );
   }
 }
